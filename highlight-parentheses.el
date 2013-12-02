@@ -76,6 +76,11 @@ The list starts with the inside parentheses and moves outwards."
   :set 'hl-paren-set
   :group 'highlight-parentheses)
 
+(defcustom hl-paren-highlight-in-string t
+  "Whether to highlight parenthesis in literal string."
+  :type  'boolean
+  :group 'highlight-parentheses)
+
 (defface hl-paren-face nil
   "Face used for highlighting parentheses.
 Color attributes might be overriden by `hl-paren-colors' and
@@ -100,6 +105,19 @@ This is used to prevent analyzing the same context over and over.")
 (defun* hl-paren-delete-overlays (&optional (overlays hl-paren-overlays))
   (mapc #'delete-overlay overlays))
 
+(defmacro hl-with-syntax-entries (syntax-entries &rest body)
+  "Run BODY with temporarily modified syntax entries."
+  (declare (indent 1) (debug t))
+  (let ((old-syntax-entries (make-symbol "old-syntax-entries")))
+    `(let ((,old-syntax-entries
+            (cl-loop for (char . descriptor) in ,syntax-entries
+                     collect (cons char (aref (syntax-table) char))
+                     do (modify-syntax-entry char descriptor))))
+       (unwind-protect
+           (progn ,@body)
+         (cl-loop for (char . syntax-code) in ,old-syntax-entries
+                  do (aset (syntax-table) char syntax-code))))))
+
 (defun hl-paren-highlight ()
   "Highlight the parentheses around point."
   (unless (= (point) hl-paren-last-point)
@@ -107,17 +125,19 @@ This is used to prevent analyzing the same context over and over.")
     (let ((overlays hl-paren-overlays)
           pos1 pos2)
       (save-excursion
-        (ignore-errors
-          (when hl-paren-highlight-adjacent
-            (cond ((memq (preceding-char) '(?\) ?\} ?\] ?\>))
-                   (backward-char 1))
-                  ((memq (following-char) '(?\( ?\{ ?\[ ?\<))
-                   (forward-char 1))))
-          (while (and (setq pos1 (cadr (syntax-ppss pos1)))
-                      (cdr overlays))
-            (move-overlay (pop overlays) pos1 (1+ pos1))
-            (when (setq pos2 (scan-sexps pos1 1))
-              (move-overlay (pop overlays) (1- pos2) pos2)))))
+        (hl-with-syntax-entries (and hl-paren-highlight-in-string
+                                     '((?\" . ".")))
+          (ignore-errors
+            (when hl-paren-highlight-adjacent
+              (cond ((memq (preceding-char) '(?\) ?\} ?\] ?\>))
+                     (backward-char 1))
+                    ((memq (following-char) '(?\( ?\{ ?\[ ?\<))
+                     (forward-char 1))))
+            (while (and (setq pos1 (cadr (syntax-ppss pos1)))
+                        (cdr overlays))
+              (move-overlay (pop overlays) pos1 (1+ pos1))
+              (when (setq pos2 (scan-sexps pos1 1))
+                (move-overlay (pop overlays) (1- pos2) pos2))))))
       (hl-paren-delete-overlays overlays))))
 
 (defcustom hl-paren-delay 0.137
